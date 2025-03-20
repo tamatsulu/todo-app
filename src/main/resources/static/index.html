@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ToDo App</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Todoリスト</h1>
+        <div class="input-container">
+            <input type="text" id="newCategory" placeholder="仕事">
+            <input type="color" id="categoryColor" value="#ffffff">
+            <select id="categorySelect"></select>
+            <button onclick="addCategory()">カテゴリ追加</button>
+        </div>
+        <div class="input-container">
+            <input type="text" id="title" placeholder="おまじい">
+            <button onclick="addTask()">追加</button>
+        </div>
+        <div id="categoriesList"></div>
+    </div>
+
+    <script>
+        let selectedCategory = ''; // 選択または入力したカテゴリを保持
+
+        // カテゴリとタスクを取得して表示
+        async function fetchCategoriesAndTodos() {
+            try {
+                // カテゴリを取得
+                const categoriesResponse = await fetch('/todos/categories');
+                if (!categoriesResponse.ok) {
+                    console.error('Failed to fetch categories:', categoriesResponse.status, categoriesResponse.statusText);
+                    return;
+                }
+                const categories = await categoriesResponse.json();
+                console.log('Fetched categories:', categories);
+
+                // カテゴリ選択ドロップダウンを更新
+                const categorySelect = document.getElementById('categorySelect');
+                categorySelect.innerHTML = '';
+                categories.forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category.name;
+                    option.textContent = category.name;
+                    categorySelect.appendChild(option);
+                });
+
+                // ドロップダウンの変更時に選択したカテゴリを更新
+                categorySelect.onchange = () => {
+                    selectedCategory = categorySelect.value;
+                    console.log('Selected category:', selectedCategory);
+                };
+
+                // 初期選択カテゴリを設定
+                if (categories.length > 0) {
+                    selectedCategory = categories[0].name;
+                    categorySelect.value = selectedCategory;
+                    console.log('Initial selected category:', selectedCategory);
+                } else {
+                    console.log('No categories available');
+                }
+
+                // カテゴリごとのタスクリストを表示
+                const categoriesList = document.getElementById('categoriesList');
+                categoriesList.innerHTML = '';
+                for (const category of categories) {
+                    const categoryDiv = document.createElement('div');
+                    categoryDiv.className = 'category';
+                    categoryDiv.style.backgroundColor = category.backgroundColor; // 背景色を設定
+                    const categoryHeader = document.createElement('h2');
+                    const colorPicker = document.createElement('input');
+                    colorPicker.type = 'color';
+                    colorPicker.value = category.backgroundColor;
+                    colorPicker.onchange = () => updateCategoryColor(category.name, colorPicker.value);
+                    categoryHeader.appendChild(colorPicker); // 色ピッカーを先頭に配置
+                    const categoryNameSpan = document.createElement('span');
+                    categoryNameSpan.textContent = category.name;
+                    categoryHeader.appendChild(categoryNameSpan);
+                    const deleteCategoryButton = document.createElement('span');
+                    deleteCategoryButton.textContent = '×';
+                    deleteCategoryButton.className = 'delete-btn';
+                    deleteCategoryButton.onclick = () => deleteCategory(category.name);
+                    categoryHeader.appendChild(deleteCategoryButton);
+                    categoryDiv.appendChild(categoryHeader);
+                    const todoList = document.createElement('ul');
+                    todoList.id = `todos-${category.name}`;
+                    categoryDiv.appendChild(todoList);
+                    categoriesList.appendChild(categoryDiv);
+
+                    // タスクを取得
+                    const encodedCategory = encodeURIComponent(category.name);
+                    const todosResponse = await fetch(`/todos/category/${encodedCategory}`);
+                    if (!todosResponse.ok) {
+                        console.error(`Failed to fetch todos for category ${category.name}:`, todosResponse.status, todosResponse.statusText);
+                        continue;
+                    }
+                    const todos = await todosResponse.json();
+                    console.log(`Fetched todos for category ${category.name}:`, todos);
+                    todoList.innerHTML = '';
+                    todos.forEach(todo => {
+                        const li = document.createElement('li');
+                        li.className = 'todo-item';
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.checked = todo.completed;
+                        checkbox.onclick = () => updateTask(todo.id, { ...todo, completed: !todo.completed });
+                        const taskTitle = document.createElement('span');
+                        taskTitle.textContent = todo.title;
+                        taskTitle.className = 'task-title';
+                        if (todo.completed) taskTitle.classList.add('completed');
+                        const deleteButton = document.createElement('span');
+                        deleteButton.textContent = '×';
+                        deleteButton.className = 'delete-btn';
+                        deleteButton.onclick = () => deleteTask(todo.id);
+                        li.appendChild(checkbox);
+                        li.appendChild(taskTitle);
+                        li.appendChild(deleteButton);
+                        todoList.appendChild(li);
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching categories and todos:', error);
+            }
+        }
+
+        // 新しいカテゴリを追加
+        async function addCategory() {
+            const newCategory = document.getElementById('newCategory').value;
+            const categoryColor = document.getElementById('categoryColor').value;
+            if (!newCategory) {
+                console.log('Category input is empty');
+                return;
+            }
+            try {
+                const response = await fetch('/todos/categories', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newCategory, backgroundColor: categoryColor })
+                });
+                if (!response.ok) {
+                    console.error('Failed to add category:', response.status, response.statusText);
+                    const errorText = await response.text();
+                    console.error('Error details:', errorText);
+                    return;
+                }
+                selectedCategory = newCategory; // 新しいカテゴリを選択状態にする
+                document.getElementById('newCategory').value = '';
+                document.getElementById('categoryColor').value = '#ffffff'; // 色選択をリセット
+                console.log('Added category:', newCategory, 'with color:', categoryColor);
+                fetchCategoriesAndTodos();
+            } catch (error) {
+                console.error('Error adding category:', error);
+            }
+        }
+
+        // カテゴリの背景色を更新
+        async function updateCategoryColor(category, color) {
+            try {
+                const response = await fetch(`/todos/categories/${encodeURIComponent(category)}/color`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(color)
+                });
+                if (!response.ok) {
+                    console.error('Failed to update category color:', response.status, response.statusText);
+                    return;
+                }
+                console.log('Updated category color:', category, 'to:', color);
+                fetchCategoriesAndTodos();
+            } catch (error) {
+                console.error('Error updating category color:', error);
+            }
+        }
+
+        // カテゴリを削除
+        async function deleteCategory(category) {
+            if (!confirm(`カテゴリ "${category}" を削除しますか？関連するタスクも削除されます。`)) {
+                return;
+            }
+            try {
+                const encodedCategory = encodeURIComponent(category);
+                const response = await fetch(`/todos/categories/${encodedCategory}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) {
+                    console.error('Failed to delete category:', response.status, response.statusText);
+                    return;
+                }
+                console.log('Deleted category:', category);
+                fetchCategoriesAndTodos();
+            } catch (error) {
+                console.error('Error deleting category:', error);
+            }
+        }
+
+        // 新しいタスクを追加
+        async function addTask() {
+            const title = document.getElementById('title').value;
+            if (!title) {
+                console.log('Task title is empty');
+                return;
+            }
+            if (!selectedCategory) {
+                console.log('No category selected');
+                return;
+            }
+            try {
+                const response = await fetch('/todos', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, completed: false, category: selectedCategory })
+                });
+                if (!response.ok) {
+                    console.error('Failed to add task:', response.status, response.statusText);
+                    const errorText = await response.text();
+                    console.error('Error details:', errorText);
+                    return;
+                }
+                document.getElementById('title').value = '';
+                console.log('Added task:', title, 'to category:', selectedCategory);
+                fetchCategoriesAndTodos();
+            } catch (error) {
+                console.error('Error adding task:', error);
+            }
+        }
+
+        // タスクを更新
+        async function updateTask(id, updatedTodo) {
+            try {
+                const response = await fetch(`/todos/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedTodo)
+                });
+                if (!response.ok) {
+                    console.error('Failed to update task:', response.status, response.statusText);
+                    return;
+                }
+                fetchCategoriesAndTodos();
+            } catch (error) {
+                console.error('Error updating task:', error);
+            }
+        }
+
+        // タスクを削除
+        async function deleteTask(id) {
+            try {
+                const response = await fetch(`/todos/${id}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) {
+                    console.error('Failed to delete task:', response.status, response.statusText);
+                    return;
+                }
+                fetchCategoriesAndTodos();
+            } catch (error) {
+                console.error('Error deleting task:', error);
+            }
+        }
+
+        // カテゴリに応じた丸のクラスを返す（今回は使用しないが、互換性のために残す）
+        function getCircleClass(category) {
+            switch (category) {
+                case '今日やるべきこと': return 'pink';
+                case '仕事': return 'blue';
+                case '買い物': return 'green';
+                case 'アメリカ旅行': return 'orange';
+                default: return 'gray';
+            }
+        }
+
+        // ページ読み込み時にカテゴリとタスクを取得
+        fetchCategoriesAndTodos();
+    </script>
+</body>
+</html>
